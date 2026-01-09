@@ -365,27 +365,12 @@ class RecommendPanel(Static):
     """Recommendation buttons panel"""
 
     def compose(self) -> ComposeResult:
+        yield Label("Quick Browse", classes="panel-title")
         yield Horizontal(
-            Vertical(
-                Button("🔥", id="rec-trending", variant="error", classes="rec-btn"),
-                Static("Hot", classes="btn-label"),
-                classes="rec-item",
-            ),
-            Vertical(
-                Button("📅", id="rec-week", variant="primary", classes="rec-btn"),
-                Static("Week", classes="btn-label"),
-                classes="rec-item",
-            ),
-            Vertical(
-                Button("📆", id="rec-month", variant="warning", classes="rec-btn"),
-                Static("Month", classes="btn-label"),
-                classes="rec-item",
-            ),
-            Vertical(
-                Button("⭐", id="rec-llm", variant="success", classes="rec-btn"),
-                Static("Picks", classes="btn-label"),
-                classes="rec-item",
-            ),
+            Button("🔥\nHot", id="rec-trending", variant="error", classes="rec-btn"),
+            Button("💬\nLLM", id="rec-llm-type", variant="primary", classes="rec-btn"),
+            Button("🔢\nEmbed", id="rec-embed", variant="warning", classes="rec-btn"),
+            Button("⭐\nPicks", id="rec-llm", variant="success", classes="rec-btn"),
             classes="rec-row",
         )
         yield Horizontal(
@@ -446,25 +431,13 @@ class ModelTUI(App):
     .rec-row {
         width: 100%;
         height: auto;
-        margin-bottom: 1;
-        align: center middle;
-    }
-    
-    .rec-item {
-        width: 1fr;
-        height: auto;
-        align: center middle;
     }
     
     .rec-btn {
-        width: 100%;
-        min-width: 3;
-    }
-    
-    .btn-label {
-        text-align: center;
-        color: $text-muted;
-        text-style: italic;
+        width: 1fr;
+        height: 4;
+        margin: 0 1;
+        content-align: center middle;
     }
     
     .lang-row {
@@ -582,10 +555,10 @@ class ModelTUI(App):
             self.download_model()
         elif event.button.id == "rec-trending":
             self.load_recommend("trending")
-        elif event.button.id == "rec-week":
-            self.load_recommend("week")
-        elif event.button.id == "rec-month":
-            self.load_recommend("month")
+        elif event.button.id == "rec-llm-type":
+            self.load_recommend("text-generation")
+        elif event.button.id == "rec-embed":
+            self.load_recommend("embedding")
         elif event.button.id == "rec-llm":
             self.load_recommend("llm")
         elif event.button.id == "lang-en":
@@ -733,14 +706,10 @@ class ModelTUI(App):
                 return
             
             # Other categories
-            if category == "week":
-                cutoff = datetime.now() - timedelta(days=7)
-                models = list(api.list_models(sort="likes", direction=-1, limit=50))
-                models = [m for m in models if hasattr(m, 'created_at') and m.created_at and m.created_at.replace(tzinfo=None) > cutoff][:20]
-            elif category == "month":
-                cutoff = datetime.now() - timedelta(days=30)
-                models = list(api.list_models(sort="likes", direction=-1, limit=100))
-                models = [m for m in models if hasattr(m, 'created_at') and m.created_at and m.created_at.replace(tzinfo=None) > cutoff][:20]
+            if category == "text-generation":
+                models = list(api.list_models(filter="text-generation", sort="downloads", direction=-1, limit=20))
+            elif category == "embedding":
+                models = list(api.list_models(filter="feature-extraction", sort="downloads", direction=-1, limit=20))
             else:  # trending
                 models = list(api.list_models(sort="trending_score", direction=-1, limit=20))
             
