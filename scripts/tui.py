@@ -196,35 +196,30 @@ class ResultsPanel(Static):
         yield DataTable(id="results-table")
 
 
-TRENDING_TABS = [
-    ("Trending", "trending"),
-    ("This Week", "week"),
-    ("This Month", "month"),
-    ("LLM Picks", "llm_picks"),
-]
-
 # LLM-curated interesting models (manually selected)
 LLM_PICKS = [
-    ("deepseek-ai/DeepSeek-R1", "Latest reasoning model with strong performance"),
-    ("Qwen/Qwen2.5-72B-Instruct", "Top open-source LLM for general tasks"),
-    ("meta-llama/Llama-3.3-70B-Instruct", "Meta's latest flagship model"),
-    ("BAAI/bge-m3", "Best multilingual embedding model"),
-    ("black-forest-labs/FLUX.1-dev", "State-of-the-art image generation"),
-    ("openai/whisper-large-v3", "Best speech recognition model"),
-    ("microsoft/phi-4", "Compact but powerful 14B model"),
-    ("google/gemma-2-27b-it", "Google's efficient instruction model"),
-    ("mistralai/Mixtral-8x22B-Instruct-v0.1", "Best MoE architecture"),
-    ("stabilityai/stable-diffusion-3.5-large", "Latest SD for image gen"),
+    "deepseek-ai/DeepSeek-R1",
+    "Qwen/Qwen2.5-72B-Instruct",
+    "meta-llama/Llama-3.3-70B-Instruct",
+    "BAAI/bge-m3",
+    "black-forest-labs/FLUX.1-dev",
+    "openai/whisper-large-v3",
+    "microsoft/phi-4",
+    "google/gemma-2-27b-it",
+    "mistralai/Mixtral-8x22B-Instruct-v0.1",
+    "stabilityai/stable-diffusion-3.5-large",
 ]
 
 
-class TrendingPanel(Static):
-    """Trending/Recommended models panel"""
+class RecommendPanel(Static):
+    """Recommendation buttons panel"""
 
     def compose(self) -> ComposeResult:
-        yield Label("Recommendations", classes="panel-title")
-        yield Select(TRENDING_TABS, id="trending-tab-select", value="trending")
-        yield DataTable(id="trending-table")
+        yield Label("Quick Browse", classes="panel-title")
+        yield Button("Trending Now", id="rec-trending", variant="warning")
+        yield Button("This Week", id="rec-week", variant="default")
+        yield Button("This Month", id="rec-month", variant="default")
+        yield Button("LLM Picks", id="rec-llm", variant="success")
 
 
 class DownloadPanel(Static):
@@ -267,12 +262,17 @@ class ModelTUI(App):
         margin: 1;
     }
     
-    TrendingPanel {
+    RecommendPanel {
         row-span: 1;
         column-span: 1;
         border: solid $warning;
         padding: 1;
         margin: 1;
+    }
+    
+    RecommendPanel Button {
+        width: 100%;
+        margin-bottom: 1;
     }
     
     DownloadPanel {
@@ -320,10 +320,7 @@ class ModelTUI(App):
         height: 100%;
     }
     
-    #trending-table {
-        height: 100%;
-    }
-    
+
     #download-status {
         margin-top: 1;
         color: $text-muted;
@@ -350,25 +347,16 @@ class ModelTUI(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield SearchPanel()
-        yield TrendingPanel()
+        yield RecommendPanel()
         yield DownloadPanel()
         yield ResultsPanel()
         yield Footer()
 
     def on_mount(self) -> None:
-        # Setup results table
         table = self.query_one("#results-table", DataTable)
         table.add_columns("#", "Model ID", "Params", "VRAM", "Quant", "Local", "Downloads", "Likes")
         table.cursor_type = "row"
-        
-        # Setup trending table
-        trending = self.query_one("#trending-table", DataTable)
-        trending.add_columns("#", "Model", "Params", "Score")
-        trending.cursor_type = "row"
-        
-        # Load data
         self.search_models()
-        self.load_trending()
 
     def action_focus_search(self) -> None:
         self.query_one("#search-input", Input).focus()
@@ -378,7 +366,6 @@ class ModelTUI(App):
 
     def action_refresh(self) -> None:
         self.search_models()
-        self.load_trending()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "search-btn":
@@ -390,19 +377,20 @@ class ModelTUI(App):
             self.search_models()
         elif event.button.id == "download-btn":
             self.download_model()
+        elif event.button.id == "rec-trending":
+            self.load_recommend("trending")
+        elif event.button.id == "rec-week":
+            self.load_recommend("week")
+        elif event.button.id == "rec-month":
+            self.load_recommend("month")
+        elif event.button.id == "rec-llm":
+            self.load_recommend("llm")
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        # Handle both results table and trending table
-        if event.data_table.id == "results-table":
-            row_data = event.data_table.get_row(event.row_key)
-            if row_data:
-                model_id = row_data[1]
-                self.query_one("#model-input", Input).value = model_id
-        elif event.data_table.id == "trending-table":
-            row_data = event.data_table.get_row(event.row_key)
-            if row_data:
-                model_id = row_data[1]
-                self.query_one("#model-input", Input).value = model_id
+        row_data = event.data_table.get_row(event.row_key)
+        if row_data:
+            model_id = row_data[1]
+            self.query_one("#model-input", Input).value = model_id
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "search-input":
@@ -414,9 +402,6 @@ class ModelTUI(App):
         if event.select.id in ("task-select", "sort-select"):
             if event.value is not Select.BLANK:
                 self.search_models()
-        elif event.select.id == "trending-tab-select":
-            if event.value is not Select.BLANK:
-                self.load_trending()
 
     @work(exclusive=True, thread=True)
     def search_models(self) -> None:
@@ -492,114 +477,97 @@ class ModelTUI(App):
         self.query_one("#download-status", Static).update(message)
 
     @work(exclusive=True, thread=True)
-    def load_trending(self) -> None:
-        """Load trending/recommended models based on selected tab"""
+    def load_recommend(self, category: str) -> None:
+        """Load recommended models and display in results table"""
+        self.call_from_thread(self.update_status, f"Loading {category} models...")
+        
         try:
-            tab = self.query_one("#trending-tab-select", Select).value
             api = HfApi()
-            
-            if tab == "llm_picks":
-                # Use LLM curated list
-                self.call_from_thread(self.update_trending_llm_picks)
-                return
-            
-            # Determine sort and filter based on tab
             from datetime import datetime, timedelta
             
-            if tab == "week":
-                # Models with most likes, created in last 7 days
-                cutoff = datetime.now() - timedelta(days=7)
-                models = list(api.list_models(
-                    sort="likes",
-                    direction=-1,
-                    limit=50,
-                ))
-                # Filter by creation date
-                models = [m for m in models if hasattr(m, 'created_at') and m.created_at and m.created_at.replace(tzinfo=None) > cutoff][:10]
-            elif tab == "month":
-                # Models with most likes, created in last 30 days
-                cutoff = datetime.now() - timedelta(days=30)
-                models = list(api.list_models(
-                    sort="likes",
-                    direction=-1,
-                    limit=100,
-                ))
-                models = [m for m in models if hasattr(m, 'created_at') and m.created_at and m.created_at.replace(tzinfo=None) > cutoff][:10]
-            else:
-                # Default: trending by trending_score
-                models = list(api.list_models(
-                    sort="trending_score",
-                    direction=-1,
-                    limit=10,
-                ))
+            if category == "llm":
+                # LLM curated picks - fetch details for each
+                model_details = {}
+                def fetch_llm_detail(model_id):
+                    try:
+                        info = api.model_info(model_id)
+                        params = 0
+                        if info.safetensors and info.safetensors.total:
+                            params = info.safetensors.total
+                        return model_id, info, params
+                    except:
+                        return model_id, None, 0
+                
+                with ThreadPoolExecutor(max_workers=5) as executor:
+                    futures = [executor.submit(fetch_llm_detail, m) for m in LLM_PICKS]
+                    results = []
+                    for future in as_completed(futures):
+                        try:
+                            model_id, info, params = future.result()
+                            if info:
+                                results.append((model_id, info, params))
+                        except:
+                            pass
+                
+                self.call_from_thread(self.update_results_llm, results)
+                self.call_from_thread(self.update_status, f"Showing {len(results)} LLM-picked models")
+                return
             
-            # Get model details in parallel
+            # Other categories
+            if category == "week":
+                cutoff = datetime.now() - timedelta(days=7)
+                models = list(api.list_models(sort="likes", direction=-1, limit=50))
+                models = [m for m in models if hasattr(m, 'created_at') and m.created_at and m.created_at.replace(tzinfo=None) > cutoff][:20]
+            elif category == "month":
+                cutoff = datetime.now() - timedelta(days=30)
+                models = list(api.list_models(sort="likes", direction=-1, limit=100))
+                models = [m for m in models if hasattr(m, 'created_at') and m.created_at and m.created_at.replace(tzinfo=None) > cutoff][:20]
+            else:  # trending
+                models = list(api.list_models(sort="trending_score", direction=-1, limit=20))
+            
+            # Fetch details in parallel
             model_details = {}
             def fetch_detail(m):
                 params = get_model_params(api, m.id)
-                score = getattr(m, 'trending_score', 0) or m.likes or 0
-                return m.id, params, score
+                return m.id, params
             
-            with ThreadPoolExecutor(max_workers=5) as executor:
+            with ThreadPoolExecutor(max_workers=10) as executor:
                 futures = {executor.submit(fetch_detail, m): m for m in models}
                 for future in as_completed(futures):
                     try:
-                        model_id, params, score = future.result()
-                        model_details[model_id] = (params, score)
+                        model_id, params = future.result()
+                        model_details[model_id] = params
                     except:
                         pass
             
-            self.call_from_thread(self.update_trending_table, models, model_details, tab)
+            self.call_from_thread(self.update_table, models, model_details)
+            self.call_from_thread(self.update_status, f"Showing {len(models)} {category} models")
         except Exception as e:
-            self.call_from_thread(self.update_status, f"Trending error: {e}")
+            self.call_from_thread(self.update_status, f"Error: {e}")
 
-    def update_trending_llm_picks(self) -> None:
-        """Update trending table with LLM picks"""
-        table = self.query_one("#trending-table", DataTable)
+    def update_results_llm(self, results) -> None:
+        """Update results table with LLM picks"""
+        table = self.query_one("#results-table", DataTable)
         table.clear()
         
-        for i, (model_id, desc) in enumerate(LLM_PICKS, 1):
-            # Truncate for display
-            display_name = model_id
-            if len(display_name) > 20:
-                display_name = display_name.split("/")[-1][:20]
-            
-            desc_short = desc[:15] + "..." if len(desc) > 15 else desc
-            
-            table.add_row(
-                str(i),
-                model_id,
-                desc_short,
-                "LLM",
-            )
-
-    def update_trending_table(self, models, model_details: dict, tab: str = "trending") -> None:
-        """Update trending table"""
-        table = self.query_one("#trending-table", DataTable)
-        table.clear()
-        
-        for i, model in enumerate(models, 1):
-            tags = model.tags or []
-            params_count, score = model_details.get(model.id, (0, 0))
+        for i, (model_id, info, params_count) in enumerate(results, 1):
+            tags = info.tags or []
             if params_count <= 0:
-                _, params_count = extract_params_from_name(model.id, tags)
+                _, params_count = extract_params_from_name(model_id, tags)
             
-            # Truncate model name for display
-            display_name = model.id
-            if len(display_name) > 25:
-                display_name = display_name[:22] + "..."
-            
-            # Format score based on tab
-            if tab == "trending":
-                score_str = str(int(score))
-            else:
-                score_str = format_number(int(score))
+            quant = extract_quant_info(model_id, tags)
+            vram = estimate_vram(params_count, quant)
+            local = can_run_locally(vram)
             
             table.add_row(
                 str(i),
-                display_name,
+                model_id[:40] if len(model_id) > 40 else model_id,
                 format_params(params_count),
-                score_str,
+                vram,
+                quant[:10] if len(quant) > 10 else quant,
+                local,
+                format_number(info.downloads or 0),
+                format_number(info.likes or 0),
             )
 
     @work(exclusive=True, thread=True)
