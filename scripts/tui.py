@@ -321,24 +321,44 @@ def get_model_desc(model_id: str, pipeline_tag: str, tags: list) -> str:
     if model_id in LLM_PICKS:
         return LLM_PICKS[model_id].get(LANG, LLM_PICKS[model_id]["en"])
     
-    # Generate description based on pipeline_tag and tags
-    templates = MODEL_DESC_TEMPLATES.get(LANG, MODEL_DESC_TEMPLATES["en"])
-    base_desc = templates.get(pipeline_tag, templates["default"])
-    
-    # Add special tags info
-    extras = []
     tags_lower = [t.lower() for t in (tags or [])]
+    parts = []
     
-    if "chat" in tags_lower or "conversational" in tags_lower:
-        extras.append("Chat" if LANG == "en" else "对话")
-    if "code" in tags_lower or "coder" in model_id.lower():
-        extras.append("Code" if LANG == "en" else "代码")
-    if any(t in tags_lower for t in ["gguf", "gptq", "awq"]):
-        extras.append("Quantized" if LANG == "en" else "量化")
+    # Determine model type from tags and name
+    model_lower = model_id.lower()
     
-    if extras:
-        return f"{base_desc} ({', '.join(extras)})"
-    return base_desc
+    # Check for specific model types
+    if "instruct" in model_lower or "chat" in tags_lower or "conversational" in tags_lower:
+        parts.append("Chat/Instruct" if LANG == "en" else "对话/指令")
+    elif "base" in model_lower:
+        parts.append("Base model" if LANG == "en" else "基座模型")
+    
+    if "code" in tags_lower or "coder" in model_lower:
+        parts.append("Code" if LANG == "en" else "代码")
+    
+    if "vision" in tags_lower or "vl" in model_lower or "image" in model_lower:
+        parts.append("Vision" if LANG == "en" else "视觉")
+    
+    if "multilingual" in tags_lower or "multi" in model_lower:
+        parts.append("Multilingual" if LANG == "en" else "多语言")
+    
+    # Add quantization info
+    quant_found = []
+    for q in ["gguf", "gptq", "awq", "exl2"]:
+        if q in tags_lower or q in model_lower:
+            quant_found.append(q.upper())
+    if quant_found:
+        parts.append(f"Quant:{','.join(quant_found)}")
+    
+    # Base description from pipeline_tag
+    templates = MODEL_DESC_TEMPLATES.get(LANG, MODEL_DESC_TEMPLATES["en"])
+    base = templates.get(pipeline_tag, "")
+    
+    if parts:
+        return ", ".join(parts)
+    elif base:
+        return base
+    return templates.get("default", "AI model")
 
 
 class RecommendPanel(Static):
@@ -346,10 +366,26 @@ class RecommendPanel(Static):
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
-            Button("🔥", id="rec-trending", variant="warning", classes="rec-btn"),
-            Button("📅", id="rec-week", variant="default", classes="rec-btn"),
-            Button("📆", id="rec-month", variant="default", classes="rec-btn"),
-            Button("⭐", id="rec-llm", variant="success", classes="rec-btn"),
+            Vertical(
+                Button("🔥", id="rec-trending", variant="error", classes="rec-btn"),
+                Static("Hot", classes="btn-label"),
+                classes="rec-item",
+            ),
+            Vertical(
+                Button("📅", id="rec-week", variant="primary", classes="rec-btn"),
+                Static("Week", classes="btn-label"),
+                classes="rec-item",
+            ),
+            Vertical(
+                Button("📆", id="rec-month", variant="warning", classes="rec-btn"),
+                Static("Month", classes="btn-label"),
+                classes="rec-item",
+            ),
+            Vertical(
+                Button("⭐", id="rec-llm", variant="success", classes="rec-btn"),
+                Static("Picks", classes="btn-label"),
+                classes="rec-item",
+            ),
             classes="rec-row",
         )
         yield Horizontal(
@@ -411,17 +447,30 @@ class ModelTUI(App):
         width: 100%;
         height: auto;
         margin-bottom: 1;
+        align: center middle;
+    }
+    
+    .rec-item {
+        width: 1fr;
+        height: auto;
+        align: center middle;
     }
     
     .rec-btn {
-        width: 1fr;
-        min-width: 4;
-        margin: 0 1;
+        width: 100%;
+        min-width: 3;
+    }
+    
+    .btn-label {
+        text-align: center;
+        color: $text-muted;
+        text-style: italic;
     }
     
     .lang-row {
         width: 100%;
         height: auto;
+        margin-top: 1;
     }
     
     .lang-btn {
@@ -508,7 +557,7 @@ class ModelTUI(App):
 
     def on_mount(self) -> None:
         table = self.query_one("#results-table", DataTable)
-        table.add_columns("#", "Model ID", "Params", "VRAM", "Local", "Desc", "Downloads")
+        table.add_columns("#", "Model ID", "Params", "VRAM", "Local", "Downloads", "Description")
         table.cursor_type = "row"
         self.search_models()
 
@@ -639,8 +688,8 @@ class ModelTUI(App):
                 params_str,
                 vram,
                 local,
-                desc[:25] if len(desc) > 25 else desc,
                 format_number(model.downloads),
+                desc[:30] if len(desc) > 30 else desc,
             )
 
     def update_status(self, message: str) -> None:
@@ -737,8 +786,8 @@ class ModelTUI(App):
                 format_params(params_count),
                 vram,
                 local,
-                desc[:25] if len(desc) > 25 else desc,
                 format_number(info.downloads or 0),
+                desc[:30] if len(desc) > 30 else desc,
             )
 
     @work(exclusive=True, thread=True)
