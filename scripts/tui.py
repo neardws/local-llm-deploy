@@ -196,30 +196,167 @@ class ResultsPanel(Static):
         yield DataTable(id="results-table")
 
 
-# LLM-curated interesting models (manually selected)
-LLM_PICKS = [
-    "deepseek-ai/DeepSeek-R1",
-    "Qwen/Qwen2.5-72B-Instruct",
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "BAAI/bge-m3",
-    "black-forest-labs/FLUX.1-dev",
-    "openai/whisper-large-v3",
-    "microsoft/phi-4",
-    "google/gemma-2-27b-it",
-    "mistralai/Mixtral-8x22B-Instruct-v0.1",
-    "stabilityai/stable-diffusion-3.5-large",
-]
+# Language settings
+LANG = "en"  # "en" or "zh"
+
+LABELS = {
+    "en": {
+        "quick_browse": "Quick Browse",
+        "trending": "Trending",
+        "week": "This Week",
+        "month": "This Month",
+        "llm_picks": "AI Picks",
+        "search": "Search",
+        "download": "Download",
+        "task_type": "Task Type",
+        "sort_by": "Sort By",
+        "language": "Lang",
+        "model_id": "Model ID",
+        "searching": "Searching...",
+        "loading": "Loading...",
+        "found": "Found",
+        "models": "models",
+    },
+    "zh": {
+        "quick_browse": "快速浏览",
+        "trending": "热门",
+        "week": "本周新品",
+        "month": "本月精选",
+        "llm_picks": "AI 推荐",
+        "search": "搜索",
+        "download": "下载",
+        "task_type": "任务类型",
+        "sort_by": "排序方式",
+        "language": "语言",
+        "model_id": "模型ID",
+        "searching": "搜索中...",
+        "loading": "加载中...",
+        "found": "找到",
+        "models": "个模型",
+    },
+}
+
+# LLM-curated interesting models with descriptions
+LLM_PICKS = {
+    "deepseek-ai/DeepSeek-R1": {
+        "en": "Top reasoning model, rivals o1",
+        "zh": "顶级推理模型，媲美o1",
+    },
+    "Qwen/Qwen2.5-72B-Instruct": {
+        "en": "Best open-source LLM for general tasks",
+        "zh": "最强开源通用大模型",
+    },
+    "meta-llama/Llama-3.3-70B-Instruct": {
+        "en": "Meta's flagship, great multilingual",
+        "zh": "Meta旗舰，多语言出色",
+    },
+    "BAAI/bge-m3": {
+        "en": "Best multilingual embedding model",
+        "zh": "最强多语言向量模型",
+    },
+    "black-forest-labs/FLUX.1-dev": {
+        "en": "State-of-the-art image generation",
+        "zh": "最强文生图模型",
+    },
+    "openai/whisper-large-v3": {
+        "en": "Best speech recognition model",
+        "zh": "最强语音识别模型",
+    },
+    "microsoft/phi-4": {
+        "en": "Compact 14B, punches above weight",
+        "zh": "14B小模型，性能超群",
+    },
+    "google/gemma-2-27b-it": {
+        "en": "Google's efficient instruction model",
+        "zh": "谷歌高效指令模型",
+    },
+    "mistralai/Mixtral-8x22B-Instruct-v0.1": {
+        "en": "Best MoE architecture model",
+        "zh": "最佳MoE架构模型",
+    },
+    "stabilityai/stable-diffusion-3.5-large": {
+        "en": "Latest Stable Diffusion for images",
+        "zh": "最新SD文生图模型",
+    },
+}
+
+# Model description templates based on pipeline_tag
+MODEL_DESC_TEMPLATES = {
+    "en": {
+        "text-generation": "LLM for text generation and chat",
+        "feature-extraction": "Embedding model for semantic search",
+        "text-to-image": "Image generation from text prompts",
+        "automatic-speech-recognition": "Speech to text transcription",
+        "text-to-speech": "Text to speech synthesis",
+        "translation": "Language translation model",
+        "summarization": "Text summarization model",
+        "question-answering": "Q&A and reading comprehension",
+        "image-classification": "Image classification model",
+        "object-detection": "Object detection in images",
+        "default": "AI model",
+    },
+    "zh": {
+        "text-generation": "文本生成/对话大模型",
+        "feature-extraction": "向量嵌入模型",
+        "text-to-image": "文生图模型",
+        "automatic-speech-recognition": "语音识别模型",
+        "text-to-speech": "语音合成模型",
+        "translation": "翻译模型",
+        "summarization": "摘要生成模型",
+        "question-answering": "问答模型",
+        "image-classification": "图像分类模型",
+        "object-detection": "目标检测模型",
+        "default": "AI模型",
+    },
+}
+
+
+def get_label(key: str) -> str:
+    return LABELS.get(LANG, LABELS["en"]).get(key, key)
+
+
+def get_model_desc(model_id: str, pipeline_tag: str, tags: list) -> str:
+    """Generate short description for a model"""
+    # Check if it's an LLM pick with predefined description
+    if model_id in LLM_PICKS:
+        return LLM_PICKS[model_id].get(LANG, LLM_PICKS[model_id]["en"])
+    
+    # Generate description based on pipeline_tag and tags
+    templates = MODEL_DESC_TEMPLATES.get(LANG, MODEL_DESC_TEMPLATES["en"])
+    base_desc = templates.get(pipeline_tag, templates["default"])
+    
+    # Add special tags info
+    extras = []
+    tags_lower = [t.lower() for t in (tags or [])]
+    
+    if "chat" in tags_lower or "conversational" in tags_lower:
+        extras.append("Chat" if LANG == "en" else "对话")
+    if "code" in tags_lower or "coder" in model_id.lower():
+        extras.append("Code" if LANG == "en" else "代码")
+    if any(t in tags_lower for t in ["gguf", "gptq", "awq"]):
+        extras.append("Quantized" if LANG == "en" else "量化")
+    
+    if extras:
+        return f"{base_desc} ({', '.join(extras)})"
+    return base_desc
 
 
 class RecommendPanel(Static):
     """Recommendation buttons panel"""
 
     def compose(self) -> ComposeResult:
-        yield Label("Quick Browse", classes="panel-title")
-        yield Button("Trending Now", id="rec-trending", variant="warning")
-        yield Button("This Week", id="rec-week", variant="default")
-        yield Button("This Month", id="rec-month", variant="default")
-        yield Button("LLM Picks", id="rec-llm", variant="success")
+        yield Horizontal(
+            Button("🔥", id="rec-trending", variant="warning", classes="rec-btn"),
+            Button("📅", id="rec-week", variant="default", classes="rec-btn"),
+            Button("📆", id="rec-month", variant="default", classes="rec-btn"),
+            Button("⭐", id="rec-llm", variant="success", classes="rec-btn"),
+            classes="rec-row",
+        )
+        yield Horizontal(
+            Button("EN", id="lang-en", variant="primary" if LANG == "en" else "default", classes="lang-btn"),
+            Button("中", id="lang-zh", variant="primary" if LANG == "zh" else "default", classes="lang-btn"),
+            classes="lang-row",
+        )
 
 
 class DownloadPanel(Static):
@@ -270,9 +407,26 @@ class ModelTUI(App):
         margin: 1;
     }
     
-    RecommendPanel Button {
+    .rec-row {
         width: 100%;
+        height: auto;
         margin-bottom: 1;
+    }
+    
+    .rec-btn {
+        width: 1fr;
+        min-width: 4;
+        margin: 0 1;
+    }
+    
+    .lang-row {
+        width: 100%;
+        height: auto;
+    }
+    
+    .lang-btn {
+        width: 1fr;
+        margin: 0 1;
     }
     
     DownloadPanel {
@@ -354,7 +508,7 @@ class ModelTUI(App):
 
     def on_mount(self) -> None:
         table = self.query_one("#results-table", DataTable)
-        table.add_columns("#", "Model ID", "Params", "VRAM", "Quant", "Local", "Downloads", "Likes")
+        table.add_columns("#", "Model ID", "Params", "VRAM", "Local", "Desc", "Downloads")
         table.cursor_type = "row"
         self.search_models()
 
@@ -385,6 +539,10 @@ class ModelTUI(App):
             self.load_recommend("month")
         elif event.button.id == "rec-llm":
             self.load_recommend("llm")
+        elif event.button.id == "lang-en":
+            self.switch_language("en")
+        elif event.button.id == "lang-zh":
+            self.switch_language("zh")
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row_data = event.data_table.get_row(event.row_key)
@@ -402,6 +560,17 @@ class ModelTUI(App):
         if event.select.id in ("task-select", "sort-select"):
             if event.value is not Select.BLANK:
                 self.search_models()
+
+    def switch_language(self, lang: str) -> None:
+        global LANG
+        LANG = lang
+        # Update button styles
+        en_btn = self.query_one("#lang-en", Button)
+        zh_btn = self.query_one("#lang-zh", Button)
+        en_btn.variant = "primary" if lang == "en" else "default"
+        zh_btn.variant = "primary" if lang == "zh" else "default"
+        # Refresh current view
+        self.search_models()
 
     @work(exclusive=True, thread=True)
     def search_models(self) -> None:
@@ -451,6 +620,7 @@ class ModelTUI(App):
         
         for i, model in enumerate(models, 1):
             tags = model.tags or []
+            pipeline_tag = model.pipeline_tag or ""
             
             # Try to get exact params from API, fallback to name extraction
             params_count = model_details.get(model.id, 0)
@@ -461,16 +631,16 @@ class ModelTUI(App):
             quant = extract_quant_info(model.id, tags)
             vram = estimate_vram(params_count, quant)
             local = can_run_locally(vram)
+            desc = get_model_desc(model.id, pipeline_tag, tags)
             
             table.add_row(
                 str(i),
-                model.id[:40] if len(model.id) > 40 else model.id,
+                model.id[:35] if len(model.id) > 35 else model.id,
                 params_str,
                 vram,
-                quant[:10] if len(quant) > 10 else quant,
                 local,
+                desc[:25] if len(desc) > 25 else desc,
                 format_number(model.downloads),
-                format_number(model.likes),
             )
 
     def update_status(self, message: str) -> None:
@@ -499,7 +669,7 @@ class ModelTUI(App):
                         return model_id, None, 0
                 
                 with ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = [executor.submit(fetch_llm_detail, m) for m in LLM_PICKS]
+                    futures = [executor.submit(fetch_llm_detail, m) for m in LLM_PICKS.keys()]
                     results = []
                     for future in as_completed(futures):
                         try:
@@ -552,22 +722,23 @@ class ModelTUI(App):
         
         for i, (model_id, info, params_count) in enumerate(results, 1):
             tags = info.tags or []
+            pipeline_tag = info.pipeline_tag or ""
             if params_count <= 0:
                 _, params_count = extract_params_from_name(model_id, tags)
             
             quant = extract_quant_info(model_id, tags)
             vram = estimate_vram(params_count, quant)
             local = can_run_locally(vram)
+            desc = get_model_desc(model_id, pipeline_tag, tags)
             
             table.add_row(
                 str(i),
-                model_id[:40] if len(model_id) > 40 else model_id,
+                model_id[:35] if len(model_id) > 35 else model_id,
                 format_params(params_count),
                 vram,
-                quant[:10] if len(quant) > 10 else quant,
                 local,
+                desc[:25] if len(desc) > 25 else desc,
                 format_number(info.downloads or 0),
-                format_number(info.likes or 0),
             )
 
     @work(exclusive=True, thread=True)
