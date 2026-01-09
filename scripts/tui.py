@@ -196,11 +196,34 @@ class ResultsPanel(Static):
         yield DataTable(id="results-table")
 
 
+TRENDING_TABS = [
+    ("Trending", "trending"),
+    ("This Week", "week"),
+    ("This Month", "month"),
+    ("LLM Picks", "llm_picks"),
+]
+
+# LLM-curated interesting models (manually selected)
+LLM_PICKS = [
+    ("deepseek-ai/DeepSeek-R1", "Latest reasoning model with strong performance"),
+    ("Qwen/Qwen2.5-72B-Instruct", "Top open-source LLM for general tasks"),
+    ("meta-llama/Llama-3.3-70B-Instruct", "Meta's latest flagship model"),
+    ("BAAI/bge-m3", "Best multilingual embedding model"),
+    ("black-forest-labs/FLUX.1-dev", "State-of-the-art image generation"),
+    ("openai/whisper-large-v3", "Best speech recognition model"),
+    ("microsoft/phi-4", "Compact but powerful 14B model"),
+    ("google/gemma-2-27b-it", "Google's efficient instruction model"),
+    ("mistralai/Mixtral-8x22B-Instruct-v0.1", "Best MoE architecture"),
+    ("stabilityai/stable-diffusion-3.5-large", "Latest SD for image gen"),
+]
+
+
 class TrendingPanel(Static):
     """Trending/Recommended models panel"""
 
     def compose(self) -> ComposeResult:
-        yield Label("Trending Models", classes="panel-title")
+        yield Label("Recommendations", classes="panel-title")
+        yield Select(TRENDING_TABS, id="trending-tab-select", value="trending")
         yield DataTable(id="trending-table")
 
 
@@ -391,6 +414,9 @@ class ModelTUI(App):
         if event.select.id in ("task-select", "sort-select"):
             if event.value is not Select.BLANK:
                 self.search_models()
+        elif event.select.id == "trending-tab-select":
+            if event.value is not Select.BLANK:
+                self.load_trending()
 
     @work(exclusive=True, thread=True)
     def search_models(self) -> None:
@@ -467,24 +493,55 @@ class ModelTUI(App):
 
     @work(exclusive=True, thread=True)
     def load_trending(self) -> None:
-        """Load trending models"""
+        """Load trending/recommended models based on selected tab"""
         try:
+            tab = self.query_one("#trending-tab-select", Select).value
             api = HfApi()
-            # Get trending models
-            trending = list(api.list_models(
-                sort="trending_score",
-                direction=-1,
-                limit=10,
-            ))
+            
+            if tab == "llm_picks":
+                # Use LLM curated list
+                self.call_from_thread(self.update_trending_llm_picks)
+                return
+            
+            # Determine sort and filter based on tab
+            from datetime import datetime, timedelta
+            
+            if tab == "week":
+                # Models with most likes, created in last 7 days
+                cutoff = datetime.now() - timedelta(days=7)
+                models = list(api.list_models(
+                    sort="likes",
+                    direction=-1,
+                    limit=50,
+                ))
+                # Filter by creation date
+                models = [m for m in models if hasattr(m, 'created_at') and m.created_at and m.created_at.replace(tzinfo=None) > cutoff][:10]
+            elif tab == "month":
+                # Models with most likes, created in last 30 days
+                cutoff = datetime.now() - timedelta(days=30)
+                models = list(api.list_models(
+                    sort="likes",
+                    direction=-1,
+                    limit=100,
+                ))
+                models = [m for m in models if hasattr(m, 'created_at') and m.created_at and m.created_at.replace(tzinfo=None) > cutoff][:10]
+            else:
+                # Default: trending by trending_score
+                models = list(api.list_models(
+                    sort="trending_score",
+                    direction=-1,
+                    limit=10,
+                ))
             
             # Get model details in parallel
             model_details = {}
             def fetch_detail(m):
                 params = get_model_params(api, m.id)
-                return m.id, params, getattr(m, 'trending_score', 0)
+                score = getattr(m, 'trending_score', 0) or m.likes or 0
+                return m.id, params, score
             
             with ThreadPoolExecutor(max_workers=5) as executor:
-                futures = {executor.submit(fetch_detail, m): m for m in trending}
+                futures = {executor.submit(fetch_detail, m): m for m in models}
                 for future in as_completed(futures):
                     try:
                         model_id, params, score = future.result()
@@ -492,11 +549,31 @@ class ModelTUI(App):
                     except:
                         pass
             
-            self.call_from_thread(self.update_trending_table, trending, model_details)
+            self.call_from_thread(self.update_trending_table, models, model_details, tab)
         except Exception as e:
-            pass  # Silently fail for trending
+            self.call_from_thread(self.update_status, f"Trending error: {e}")
 
-    def update_trending_table(self, models, model_details: dict) -> None:
+    def update_trending_llm_picks(self) -> None:
+        """Update trending table with LLM picks"""
+        table = self.query_one("#trending-table", DataTable)
+        table.clear()
+        
+        for i, (model_id, desc) in enumerate(LLM_PICKS, 1):
+            # Truncate for display
+            display_name = model_id
+            if len(display_name) > 20:
+                display_name = display_name.split("/")[-1][:20]
+            
+            desc_short = desc[:15] + "..." if len(desc) > 15 else desc
+            
+            table.add_row(
+                str(i),
+                model_id,
+                desc_short,
+                "LLM",
+            )
+
+    def update_trending_table(self, models, model_details: dict, tab: str = "trending") -> None:
         """Update trending table"""
         table = self.query_one("#trending-table", DataTable)
         table.clear()
@@ -512,11 +589,17 @@ class ModelTUI(App):
             if len(display_name) > 25:
                 display_name = display_name[:22] + "..."
             
+            # Format score based on tab
+            if tab == "trending":
+                score_str = str(int(score))
+            else:
+                score_str = format_number(int(score))
+            
             table.add_row(
                 str(i),
                 display_name,
                 format_params(params_count),
-                str(score),
+                score_str,
             )
 
     @work(exclusive=True, thread=True)
