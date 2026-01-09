@@ -45,9 +45,13 @@ SOURCE_OPTIONS = [
 
 QUANT_PATTERNS = ["gguf", "gptq", "awq", "bnb", "int4", "int8", "fp16", "bf16", "exl2"]
 SIZE_PATTERNS = [
-    (r"(\d+\.?\d*)b", 1e9),
-    (r"(\d+\.?\d*)m", 1e6),
-    (r"(\d+)x(\d+\.?\d*)b", lambda m: int(m.group(1)) * float(m.group(2)) * 1e9),
+    (r"[-_](\d+)x(\d+\.?\d*)[bB]", lambda m: int(m.group(1)) * float(m.group(2)) * 1e9),  # 8x7B
+    (r"[-_](\d+\.?\d*)[bB][-_]", 1e9),  # -7B- or _7B_
+    (r"[-_](\d+\.?\d*)[bB]$", 1e9),     # ends with -7B
+    (r"[-/](\d+\.?\d*)[bB][^a-zA-Z]", 1e9),  # /7B- or -7B-
+    (r"(\d+\.?\d*)[bB]", 1e9),          # general 7B
+    (r"[-_](\d+)[mM][-_]", 1e6),        # -350M-
+    (r"[-_](\d+)[mM]$", 1e6),           # ends with -350M
 ]
 
 LOCAL_VRAM_GB = 96  # 2x RTX 4090 D (48GB each)
@@ -77,7 +81,7 @@ def format_size(size_bytes: int) -> str:
 
 def extract_params_from_name(model_id: str, tags: list) -> str:
     """Extract parameter count from model name or tags"""
-    text = model_id.lower() + " " + " ".join(tags or []).lower()
+    text = model_id + " " + " ".join(tags or [])
     for pattern, multiplier in SIZE_PATTERNS:
         match = re.search(pattern, text)
         if match:
