@@ -22,5 +22,11 @@ pip install vllm
 echo "Installing additional utilities..."
 pip install huggingface_hub requests
 
+echo "Installing ModelScope (optional download source)..."
+pip install modelscope
+
+echo "Installing TUI dependencies..."
+pip install textual
+
 echo "Setup complete!"
 echo "To activate the environment, run: source venv/bin/activate"
