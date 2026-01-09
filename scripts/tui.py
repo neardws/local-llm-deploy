@@ -50,7 +50,7 @@ SIZE_PATTERNS = [
     (r"(\d+)x(\d+\.?\d*)b", lambda m: int(m.group(1)) * float(m.group(2)) * 1e9),
 ]
 
-LOCAL_VRAM_GB = 24  # Default GPU VRAM, can be adjusted
+LOCAL_VRAM_GB = 96  # 2x RTX 4090 D (48GB each)
 
 
 def format_number(num: int) -> str:
