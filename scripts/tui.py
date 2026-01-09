@@ -435,8 +435,8 @@ class ModelTUI(App):
     
     .rec-btn {
         width: 1fr;
-        height: 4;
-        margin: 0 1;
+        height: 3;
+        min-width: 6;
         content-align: center middle;
     }
     
@@ -448,7 +448,7 @@ class ModelTUI(App):
     
     .lang-btn {
         width: 1fr;
-        margin: 0 1;
+        min-width: 12;
     }
     
     DownloadPanel {
