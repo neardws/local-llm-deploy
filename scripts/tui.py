@@ -18,6 +18,7 @@ from textual import work
 from huggingface_hub import HfApi
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 TASK_OPTIONS = [
     ("All Tasks", ""),
@@ -79,8 +80,8 @@ def format_size(size_bytes: int) -> str:
     return f"{size_bytes / 1e3:.1f}KB"
 
 
-def extract_params_from_name(model_id: str, tags: list) -> str:
-    """Extract parameter count from model name or tags"""
+def extract_params_from_name(model_id: str, tags: list) -> tuple[str, int]:
+    """Extract parameter count from model name or tags, returns (display_str, raw_params)"""
     text = model_id + " " + " ".join(tags or [])
     for pattern, multiplier in SIZE_PATTERNS:
         match = re.search(pattern, text)
@@ -90,10 +91,32 @@ def extract_params_from_name(model_id: str, tags: list) -> str:
             else:
                 params = float(match.group(1)) * multiplier
             if params >= 1e9:
-                return f"{params / 1e9:.1f}B"
+                return f"{params / 1e9:.1f}B", int(params)
             elif params >= 1e6:
-                return f"{params / 1e6:.0f}M"
-    return "N/A"
+                return f"{params / 1e6:.0f}M", int(params)
+    return "N/A", 0
+
+
+def get_model_params(api: HfApi, model_id: str) -> int:
+    """Get exact parameter count from model_info API"""
+    try:
+        info = api.model_info(model_id)
+        if info.safetensors and info.safetensors.total:
+            return info.safetensors.total
+    except:
+        pass
+    return 0
+
+
+def format_params(params: int) -> str:
+    """Format parameter count for display"""
+    if params <= 0:
+        return "N/A"
+    if params >= 1e9:
+        return f"{params / 1e9:.1f}B"
+    elif params >= 1e6:
+        return f"{params / 1e6:.0f}M"
+    return f"{params / 1e3:.0f}K"
 
 
 def extract_quant_info(model_id: str, tags: list) -> str:
@@ -106,19 +129,9 @@ def extract_quant_info(model_id: str, tags: list) -> str:
     return ", ".join(quants) if quants else "No"
 
 
-def estimate_vram(params_str: str, quant_info: str) -> str:
+def estimate_vram(params: int, quant_info: str) -> str:
     """Estimate VRAM requirement based on params and quantization"""
-    if params_str == "N/A":
-        return "N/A"
-    
-    try:
-        if "B" in params_str:
-            params = float(params_str.replace("B", "")) * 1e9
-        elif "M" in params_str:
-            params = float(params_str.replace("M", "")) * 1e6
-        else:
-            return "N/A"
-    except:
+    if params <= 0:
         return "N/A"
     
     if "INT4" in quant_info or "GPTQ" in quant_info or "AWQ" in quant_info or "GGUF" in quant_info:
@@ -358,27 +371,53 @@ class ModelTUI(App):
                     search=search if search else None,
                     sort=sort,
                     direction=-1,
-                    limit=50,
+                    limit=30,
                 )
             )
-            self.call_from_thread(self.update_table, models)
+            self.call_from_thread(self.update_status, f"Found {len(models)} models, fetching details...")
+            
+            # Fetch detailed info for each model in parallel
+            model_details = {}
+            def fetch_detail(m):
+                params = get_model_params(api, m.id)
+                return m.id, params
+            
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(fetch_detail, m): m for m in models}
+                for future in as_completed(futures):
+                    try:
+                        model_id, params = future.result()
+                        model_details[model_id] = params
+                    except:
+                        pass
+            
+            self.call_from_thread(self.update_table, models, model_details)
             self.call_from_thread(self.update_status, f"Found {len(models)} models")
         except Exception as e:
             self.call_from_thread(self.update_status, f"Error: {e}")
 
-    def update_table(self, models) -> None:
+    def update_table(self, models, model_details: dict = None) -> None:
         table = self.query_one("#results-table", DataTable)
         table.clear()
+        model_details = model_details or {}
+        
         for i, model in enumerate(models, 1):
             tags = model.tags or []
-            params = extract_params_from_name(model.id, tags)
+            
+            # Try to get exact params from API, fallback to name extraction
+            params_count = model_details.get(model.id, 0)
+            if params_count <= 0:
+                _, params_count = extract_params_from_name(model.id, tags)
+            
+            params_str = format_params(params_count)
             quant = extract_quant_info(model.id, tags)
-            vram = estimate_vram(params, quant)
+            vram = estimate_vram(params_count, quant)
             local = can_run_locally(vram)
+            
             table.add_row(
                 str(i),
                 model.id[:40] if len(model.id) > 40 else model.id,
-                params,
+                params_str,
                 vram,
                 quant[:10] if len(quant) > 10 else quant,
                 local,
