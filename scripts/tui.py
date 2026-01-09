@@ -12,12 +12,12 @@ from textual.widgets import (
     Static,
     Select,
     Label,
-    LoadingIndicator,
 )
 from textual.binding import Binding
 from textual import work
 from huggingface_hub import HfApi
 import os
+import re
 
 TASK_OPTIONS = [
     ("All Tasks", ""),
@@ -43,6 +43,15 @@ SOURCE_OPTIONS = [
     ("ModelScope", "modelscope"),
 ]
 
+QUANT_PATTERNS = ["gguf", "gptq", "awq", "bnb", "int4", "int8", "fp16", "bf16", "exl2"]
+SIZE_PATTERNS = [
+    (r"(\d+\.?\d*)b", 1e9),
+    (r"(\d+\.?\d*)m", 1e6),
+    (r"(\d+)x(\d+\.?\d*)b", lambda m: int(m.group(1)) * float(m.group(2)) * 1e9),
+]
+
+LOCAL_VRAM_GB = 24  # Default GPU VRAM, can be adjusted
+
 
 def format_number(num: int) -> str:
     if num is None:
@@ -52,6 +61,90 @@ def format_number(num: int) -> str:
     elif num >= 1_000:
         return f"{num / 1_000:.1f}K"
     return str(num)
+
+
+def format_size(size_bytes: int) -> str:
+    if size_bytes is None:
+        return "N/A"
+    if size_bytes >= 1e12:
+        return f"{size_bytes / 1e12:.1f}TB"
+    elif size_bytes >= 1e9:
+        return f"{size_bytes / 1e9:.1f}GB"
+    elif size_bytes >= 1e6:
+        return f"{size_bytes / 1e6:.1f}MB"
+    return f"{size_bytes / 1e3:.1f}KB"
+
+
+def extract_params_from_name(model_id: str, tags: list) -> str:
+    """Extract parameter count from model name or tags"""
+    text = model_id.lower() + " " + " ".join(tags or []).lower()
+    for pattern, multiplier in SIZE_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            if callable(multiplier):
+                params = multiplier(match)
+            else:
+                params = float(match.group(1)) * multiplier
+            if params >= 1e9:
+                return f"{params / 1e9:.1f}B"
+            elif params >= 1e6:
+                return f"{params / 1e6:.0f}M"
+    return "N/A"
+
+
+def extract_quant_info(model_id: str, tags: list) -> str:
+    """Extract quantization info from model name or tags"""
+    text = model_id.lower() + " " + " ".join(tags or []).lower()
+    quants = []
+    for q in QUANT_PATTERNS:
+        if q in text:
+            quants.append(q.upper())
+    return ", ".join(quants) if quants else "No"
+
+
+def estimate_vram(params_str: str, quant_info: str) -> str:
+    """Estimate VRAM requirement based on params and quantization"""
+    if params_str == "N/A":
+        return "N/A"
+    
+    try:
+        if "B" in params_str:
+            params = float(params_str.replace("B", "")) * 1e9
+        elif "M" in params_str:
+            params = float(params_str.replace("M", "")) * 1e6
+        else:
+            return "N/A"
+    except:
+        return "N/A"
+    
+    if "INT4" in quant_info or "GPTQ" in quant_info or "AWQ" in quant_info or "GGUF" in quant_info:
+        bytes_per_param = 0.5
+    elif "INT8" in quant_info or "BNB" in quant_info:
+        bytes_per_param = 1
+    elif "FP16" in quant_info or "BF16" in quant_info:
+        bytes_per_param = 2
+    else:
+        bytes_per_param = 2
+    
+    vram_bytes = params * bytes_per_param * 1.2
+    vram_gb = vram_bytes / 1e9
+    return f"{vram_gb:.1f}GB"
+
+
+def can_run_locally(vram_str: str, local_vram: float = LOCAL_VRAM_GB) -> str:
+    """Check if model can run on local GPU"""
+    if vram_str == "N/A":
+        return "?"
+    try:
+        vram = float(vram_str.replace("GB", ""))
+        if vram <= local_vram:
+            return "Yes"
+        elif vram <= local_vram * 2:
+            return "Maybe"
+        else:
+            return "No"
+    except:
+        return "?"
 
 
 class SearchPanel(Static):
@@ -203,7 +296,7 @@ class ModelTUI(App):
 
     def on_mount(self) -> None:
         table = self.query_one("#results-table", DataTable)
-        table.add_columns("#", "Model ID", "Downloads", "Likes", "Task")
+        table.add_columns("#", "Model ID", "Params", "VRAM", "Quant", "Local", "Downloads", "Likes")
         table.cursor_type = "row"
         self.search_models()
 
@@ -240,6 +333,11 @@ class ModelTUI(App):
         elif event.input.id == "model-input":
             self.download_model()
 
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id in ("task-select", "sort-select"):
+            if event.value is not Select.BLANK:
+                self.search_models()
+
     @work(exclusive=True, thread=True)
     def search_models(self) -> None:
         search = self.query_one("#search-input", Input).value
@@ -268,12 +366,20 @@ class ModelTUI(App):
         table = self.query_one("#results-table", DataTable)
         table.clear()
         for i, model in enumerate(models, 1):
+            tags = model.tags or []
+            params = extract_params_from_name(model.id, tags)
+            quant = extract_quant_info(model.id, tags)
+            vram = estimate_vram(params, quant)
+            local = can_run_locally(vram)
             table.add_row(
                 str(i),
-                model.id,
+                model.id[:40] if len(model.id) > 40 else model.id,
+                params,
+                vram,
+                quant[:10] if len(quant) > 10 else quant,
+                local,
                 format_number(model.downloads),
                 format_number(model.likes),
-                model.pipeline_tag or "N/A",
             )
 
     def update_status(self, message: str) -> None:
